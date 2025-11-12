@@ -1,354 +1,360 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { prisma } from "@/lib/prisma";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-interface RefinementData {
-  satisfied: boolean | null;
-  feedback: string;
-}
-
-interface Refinements {
-  [key: string]: RefinementData;
-}
-
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-interface RefineRequest {
-  currentJD: any;
-  refinements: Refinements;
-  chatHistory?: ChatMessage[];
-}
-
-interface ChangeInfo {
-  section: string;
-  refinementKey: string;
-  feedback: string;
+interface RefineRequestBody {
+  userId: string;
+  analysisId?: string;
+  message: string;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body: RefineRequest = await req.json();
-    const { currentJD, refinements, chatHistory = [] } = body;
+    const { userId, message, analysisId }: RefineRequestBody = await req.json();
 
-    // Validate input
-    if (!currentJD || !refinements) {
+    if (!message?.trim() || !userId || !analysisId) {
       return NextResponse.json(
-        { 
+        {
           success: false,
-          error: 'Missing required fields: currentJD and refinements' 
+          error: "Message is required",
         },
         { status: 400 }
       );
     }
 
-    // Build the refinement prompt
-    const refinementPrompt = buildRefinementPrompt(currentJD, refinements, chatHistory);
-
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT
+    const savedAnalysis = await prisma.savedAnalysis.findFirst({
+      where: {
+        userId,
+        ...(analysisId ? { id: analysisId } : {}),
+        ...(analysisId ? {} : { isFinalized: false }),
+      },
+      include: {
+        refinements: {
+          orderBy: { sequenceNumber: "asc" },
         },
-        {
-          role: "user",
-          content: refinementPrompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 4000,
-      response_format: { type: "json_object" }
+      },
+      orderBy: analysisId ? undefined : { createdAt: "desc" },
     });
 
-    // Parse the response
-    const responseText = completion.choices[0].message.content;
-    if (!responseText) {
-      throw new Error('No response from OpenAI');
+    if (!savedAnalysis) {
+      return NextResponse.json(
+        { success: false, error: "Analysis not found" },
+        { status: 404 }
+      );
     }
 
-    const updatedJD = JSON.parse(responseText);
-    
-    // Identify what changed
-    const changedSections = identifyChanges(currentJD, updatedJD, refinements);
+    // if (savedAnalysis.isFinalized) {
+    //   return NextResponse.json(
+    //     { success: false, error: "Cannot refine a finalized analysis" },
+    //     { status: 400 }
+    //   );
+    // }
 
-    // Return the refined JD with metadata
+    // 2. Build conversation context for AI
+    const conversationHistory = [
+      {
+        role: "system" as const,
+        content: buildSystemPrompt(
+          savedAnalysis.analysis,
+          savedAnalysis.intakeData
+        ),
+      },
+      // Add all previous refinement messages for full context
+      ...savedAnalysis.refinements.map((msg) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      })),
+      // Add new user message
+      {
+        role: "user" as const,
+        content: message,
+      },
+    ];
+
+    // 3. Call OpenAI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: conversationHistory,
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+      max_tokens: 4000,
+    });
+
+    const responseText = completion.choices[0].message.content;
+    if (!responseText) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const updatedAnalysis = JSON.parse(responseText);
+
+    // 4. Detect what changed
+    const changedSections = identifyChanges(
+      savedAnalysis.analysis,
+      updatedAnalysis
+    );
+
+    // 5. Generate change summary
+    const changeSummary = generateChangeSummary(changedSections);
+
+    // 6. Get next sequence number
+    const nextSequence = savedAnalysis.refinements.length + 1;
+
+    // 7. Save both messages (user + assistant) + update analysis in transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Save user message
+      await tx.refinementMessage.create({
+        data: {
+          analysisId: savedAnalysis.id,
+          role: "user",
+          content: message,
+          changedSections: [],
+          sequenceNumber: nextSequence,
+          analysisSnapshot: savedAnalysis.analysis as any,
+        },
+      });
+
+      // Save assistant message
+      await tx.refinementMessage.create({
+        data: {
+          analysisId: savedAnalysis.id,
+          role: "assistant",
+          content: responseText,
+          changedSections,
+          sequenceNumber: nextSequence + 1,
+          analysisSnapshot: updatedAnalysis as any,
+        },
+      });
+
+      // Update SavedAnalysis with latest state
+      const updated = await tx.savedAnalysis.update({
+        where: { id: savedAnalysis.id },
+        data: {
+          analysis: updatedAnalysis,
+          updatedAt: new Date(),
+        },
+        include: {
+          refinements: {
+            orderBy: { sequenceNumber: "asc" },
+          },
+        },
+      });
+
+      return updated;
+    });
+
     return NextResponse.json({
       success: true,
       data: {
-        updatedJD,
+        messages: result.refinements,
+        updatedAnalysis: result.analysis,
         changedSections,
-        summary: generateChangeSummary(changedSections, refinements),
-        timestamp: new Date().toISOString(),
-        tokensUsed: completion.usage?.total_tokens || 0
-      }
+        changedSectionNames: changeSummary.sections,
+        summary: changeSummary.summary,
+        timestamp: result.updatedAt.toISOString(),
+        tokensUsed: completion.usage?.total_tokens || 0,
+      },
     });
-
   } catch (error) {
-    console.error('Refinement error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to refine job description';
+    console.error("Refinement error:", error);
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Failed to refine job description";
     return NextResponse.json(
       {
         success: false,
-        error: 'Failed to refine job description',
-        details: errorMessage
+        error: "Failed to refine analysis",
+        details: errorMessage,
       },
       { status: 500 }
     );
   }
 }
 
-// System prompt for the refinement task
-const SYSTEM_PROMPT = `You are an expert job description refinement assistant. Your role is to take an existing job description and user feedback, then produce an updated version that incorporates their requested changes.
+function buildSystemPrompt(currentAnalysis: any, intakeData: any): string {
+  return `You are an expert job description refinement assistant for Level 9 Virtual. You help refine job descriptions based on conversational feedback.
 
-CRITICAL RULES:
-1. ONLY modify sections where the user provided feedback (satisfied: false)
-2. Maintain the exact JSON structure provided
-3. Keep all other sections completely unchanged
-4. Be precise and surgical with edits - don't over-modify
-5. Ensure consistency across related fields (e.g., if responsibilities change, skills might need adjustment)
-6. Return ONLY valid JSON in this exact format:
-   {
-     "what_you_told_us": "...",
-     "roles": [...],
-     "split_table": [...],
-     "service_recommendation": {...},
-     "onboarding_2w": {...},
-     "risks": [...],
-     "assumptions": [...]
-   }
-7. Preserve all original formatting, arrays, and nested structures
+# Current Analysis State
+${JSON.stringify(currentAnalysis, null, 2)}
 
-REFINEMENT APPROACH:
-- If user says "remove X", completely remove references to X from ALL related sections
-- If user says "focus more on Y", emphasize Y in relevant sections
-- If user says "mark as good to have", adjust the language (e.g., "Proficient in X (nice to have)")
-- If user says "add more", expand the section with relevant additions
-- Always maintain professional tone and specificity
-- When removing something like "ETL", check: responsibilities, skills, tools, and sample_week
+# Original Intake Data (for reference)
+${JSON.stringify(intakeData, null, 2)}
 
-IMPORTANT: You must return valid JSON that matches the exact structure of the input.`;
+# Your Role
+- Listen to the user's refinement requests in natural conversation
+- Make ONLY the changes they request
+- Maintain all other content exactly as is
+- Ensure changes are consistent across related sections
+- Return the COMPLETE updated analysis as valid JSON
 
-// Build the refinement prompt
-function buildRefinementPrompt(currentJD: any, refinements: Refinements, chatHistory: ChatMessage[]): string {
-  // Extract unsatisfied sections
-  const unsatisfiedSections = Object.entries(refinements)
-    .filter(([_, data]) => !data.satisfied && data.feedback)
-    .map(([section, data]) => ({
-      section,
-      feedback: data.feedback
-    }));
+# Rules for Changes
+1. **Removal requests**: If user says "remove X" or "don't need X", remove ALL references from:
+   - responsibilities
+   - skills
+   - tools
+   - sample_week
+   - kpis (if relevant)
 
-  if (unsatisfiedSections.length === 0) {
-    return `The user is satisfied with all sections. Return the job description unchanged as valid JSON.
+2. **Optional/Nice-to-have**: If user says "make X optional" or "nice to have", update language:
+   - Example: "Proficient in X (nice to have)"
+   - Example: "Bonus: Experience with X"
 
-Current JD:
-${JSON.stringify(currentJD, null, 2)}`;
-  }
+3. **Emphasis changes**: If user says "focus more on Y", increase prominence of Y in:
+   - core_outcomes
+   - responsibilities
+   - skills
+   - sample_week
 
-  // Build context from chat history (last 3 exchanges)
-  const recentContext = chatHistory.slice(-6).map((msg: ChatMessage) => 
-    `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
-  ).join('\n');
+4. **Additions**: If user says "add Z", integrate it naturally into relevant sections
 
-  return `# Current Job Description
-${JSON.stringify(currentJD, null, 2)}
+5. **Hour/service changes**: If user changes hours or service type, update:
+   - roles[].hours_per_week
+   - split_table[].hrs
+   - service_recommendation if needed
 
-# User Refinement Requests
-The user has reviewed the job description and provided the following feedback on specific sections:
+6. **Maintain consistency**: Changes should cascade logically
+   - If responsibilities change, skills might need adjustment
+   - If tools are removed, remove them from sample_week too
+   - Keep personality traits aligned with the actual role duties
 
-${unsatisfiedSections.map(item => `
-**Section: ${item.section}**
-User Feedback: "${item.feedback}"
-Action Required: Update this section based on the feedback
-`).join('\n')}
-
-${chatHistory.length > 0 ? `\n# Previous Conversation Context\n${recentContext}\n` : ''}
-
-# Your Task
-Refine ONLY the sections mentioned above based on the user's feedback. 
-
-Specific instructions per section:
-${unsatisfiedSections.map(item => {
-  const instructions = generateSectionInstructions(item.section, item.feedback);
-  return `\n**${item.section}**:\n- Feedback: ${item.feedback}\n- Action: ${instructions}`;
-}).join('\n')}
-
-CRITICAL REMINDERS:
-1. Keep all OTHER sections exactly as they are (do not modify sections marked satisfied: true)
-2. Maintain the exact JSON structure
-3. If removing content (like ETL), remove it from ALL related sections:
-   - responsibilities array
-   - skills array  
-   - tools array
-   - sample_week descriptions
-4. If marking something as "nice to have", update the language in the relevant arrays
-5. Ensure changes are cohesive and consistent across the document
-6. Return the COMPLETE updated job description as valid JSON
-
-Return ONLY the JSON object, no explanations or markdown.`;
+# Response Format
+Return ONLY valid JSON in this exact structure:
+{
+  "what_you_told_us": "...",
+  "roles": [...],
+  "split_table": [...],
+  "service_recommendation": {...},
+  "onboarding_2w": {...},
+  "risks": [...],
+  "assumptions": [...]
 }
 
-// Generate specific instructions based on section and feedback
-function generateSectionInstructions(section: string, feedback: string): string {
-  const lowerFeedback = feedback.toLowerCase();
-  
-  if (lowerFeedback.includes('remove') || lowerFeedback.includes('delete')) {
-    const toRemove = extractWhatToRemove(feedback);
-    return `Remove all references to "${toRemove}" from the ${section} section and any related sections (responsibilities, skills, tools, sample_week).`;
-  }
-  
-  if (lowerFeedback.includes('good to have') || lowerFeedback.includes('nice to have') || lowerFeedback.includes('optional')) {
-    const skill = extractSkillName(feedback);
-    return `Update the language to mark "${skill}" as optional/nice-to-have. Example: "Proficient in ${skill} (nice to have)" or "Bonus: Experience with ${skill}".`;
-  }
-  
-  if (lowerFeedback.includes('focus more') || lowerFeedback.includes('emphasize')) {
-    const focus = extractFocusArea(feedback);
-    return `Increase emphasis on "${focus}" throughout the ${section} section. Add more detail and prominence.`;
-  }
-  
-  if (lowerFeedback.includes('add') || lowerFeedback.includes('include')) {
-    return `Add relevant content to the ${section} section based on the feedback: "${feedback}"`;
-  }
-  
-  return `Modify the ${section} section according to: "${feedback}"`;
+# Conversation Style
+- Be conversational and helpful in acknowledging changes
+- Explain what you're changing and why
+- Ask clarifying questions if the request is ambiguous
+- But always return the complete JSON structure
+
+CRITICAL: Return the COMPLETE analysis JSON. Do not truncate any sections.`;
 }
 
-// Helper to extract what needs to be removed
-function extractWhatToRemove(feedback: string): string {
-  const patterns = [
-    /remove (?:the )?(.+?)(?:\s+part|\s+can|\s+and|$)/i,
-    /delete (?:the )?(.+?)(?:\s+part|\s+can|\s+and|$)/i,
-  ];
-  
-  for (const pattern of patterns) {
-    const match = feedback.match(pattern);
-    if (match) return match[1].trim();
-  }
-  
-  return 'specified content';
-}
+// Identify what changed between old and new analysis
+function identifyChanges(oldAnalysis: any, newAnalysis: any): string[] {
+  const changes: string[] = [];
 
-// Helper to extract skill name
-function extractSkillName(feedback: string): string {
-  const patterns = [
-    /mark (?:the )?(.+?) (?:as|skills)/i,
-    /(.+?) (?:as good to have|as nice to have)/i,
-  ];
-  
-  for (const pattern of patterns) {
-    const match = feedback.match(pattern);
-    if (match) return match[1].trim();
-  }
-  
-  return 'mentioned skills';
-}
-
-// Helper to extract focus area
-function extractFocusArea(feedback: string): string {
-  const patterns = [
-    /focus more on (?:the )?(.+?)(?:\s+part|$)/i,
-    /emphasize (?:the )?(.+?)(?:\s+part|$)/i,
-  ];
-  
-  for (const pattern of patterns) {
-    const match = feedback.match(pattern);
-    if (match) return match[1].trim();
-  }
-  
-  return 'specified area';
-}
-
-// Identify what changed between old and new JD
-function identifyChanges(oldJD: any, newJD: any, refinements: Refinements): ChangeInfo[] {
-  const changes: ChangeInfo[] = [];
-  
-  // Check each unsatisfied section
-  Object.entries(refinements).forEach(([section, data]) => {
-    if (!data.satisfied) {
-      // Map refinement keys to JD structure
-      const jdPaths = mapRefinementKeyToJDPath(section);
-      
-      // Check if any of the paths changed
-      const pathsArray = Array.isArray(jdPaths) ? jdPaths : [jdPaths];
-      
-      pathsArray.forEach(jdPath => {
-        if (hasChanged(oldJD, newJD, jdPath)) {
-          changes.push({
-            section: jdPath,
-            refinementKey: section,
-            feedback: data.feedback
-          });
-        }
-      });
+  const compareObjects = (obj1: any, obj2: any, path = "") => {
+    // Handle null/undefined
+    if (obj1 === obj2) return;
+    if (
+      obj1 === null ||
+      obj1 === undefined ||
+      obj2 === null ||
+      obj2 === undefined
+    ) {
+      if (obj1 !== obj2 && path) {
+        changes.push(path);
+      }
+      return;
     }
-  });
-  
-  return changes;
-}
 
-// Map refinement keys to actual JD paths
-function mapRefinementKeyToJDPath(refinementKey: string): string | string[] {
-  const mapping: Record<string, string | string[]> = {
-    'role': 'roles[0].title',
-    'outcomes': 'roles[0].core_outcomes',
-    'responsibilities': 'roles[0].responsibilities',
-    'skills-tools': ['roles[0].skills', 'roles[0].tools'],
-    'skills': 'roles[0].skills',
-    'tools': 'roles[0].tools',
-    'kpis': 'roles[0].kpis',
-    'service': 'service_recommendation.best_fit',
-    'personality': 'roles[0].personality',
-    'sample-week': 'roles[0].sample_week',
-    'onboarding': 'onboarding_2w',
-    'communication': 'roles[0].communication_norms',
-    'overlap': 'roles[0].overlap_requirements'
+    // Handle arrays
+    if (Array.isArray(obj2)) {
+      if (
+        !Array.isArray(obj1) ||
+        JSON.stringify(obj1) !== JSON.stringify(obj2)
+      ) {
+        changes.push(path);
+      }
+      return;
+    }
+
+    // Handle objects
+    if (typeof obj2 === "object") {
+      for (const key in obj2) {
+        const currentPath = path ? `${path}.${key}` : key;
+        compareObjects(obj1?.[key], obj2[key], currentPath);
+      }
+      return;
+    }
+
+    // Handle primitives
+    if (obj1 !== obj2 && path) {
+      changes.push(path);
+    }
   };
-  
-  return mapping[refinementKey] || refinementKey;
+
+  compareObjects(oldAnalysis, newAnalysis);
+
+  // Deduplicate parent paths (if "roles.0.skills" changed, don't also list "roles.0.skills.0")
+  return deduplicatePaths(changes);
 }
 
-// Check if a specific path has changed
-function hasChanged(oldObj: any, newObj: any, path: string): boolean {
-  const oldValue = getNestedValue(oldObj, path);
-  const newValue = getNestedValue(newObj, path);
-  
-  return JSON.stringify(oldValue) !== JSON.stringify(newValue);
-}
+// Remove child paths if parent path is already included
+function deduplicatePaths(paths: string[]): string[] {
+  const sorted = [...paths].sort((a, b) => a.length - b.length);
+  const deduplicated: string[] = [];
 
-// Get nested value from object using path string
-function getNestedValue(obj: any, path: string): any {
-  return path.split('.').reduce((current: any, key: string) => {
-    // Handle array notation like "roles[0]"
-    const arrayMatch = key.match(/(\w+)\[(\d+)\]/);
-    if (arrayMatch) {
-      const [, arrayKey, index] = arrayMatch;
-      return current?.[arrayKey]?.[parseInt(index)];
+  for (const path of sorted) {
+    const hasParent = deduplicated.some((parent) =>
+      path.startsWith(parent + ".")
+    );
+    if (!hasParent) {
+      deduplicated.push(path);
     }
-    return current?.[key];
-  }, obj);
+  }
+
+  return deduplicated;
 }
 
 // Generate a human-readable summary of changes
-function generateChangeSummary(changedSections: ChangeInfo[], refinements: Refinements): string {
+function generateChangeSummary(changedSections: string[]): {
+  sections: string[];
+  summary: string;
+} {
   if (changedSections.length === 0) {
-    return "No changes were made to the job description.";
+    return {
+      sections: [],
+      summary: "No changes were made to the analysis.",
+    };
   }
-  
-  const summaries = changedSections.map(change => {
-    const sectionName = change.refinementKey
-      .replace(/-/g, ' ')
-      .replace(/\b\w/g, (c: string) => c.toUpperCase());
-    return `• **${sectionName}**: ${change.feedback}`;
+
+  // Group changes by major section
+  const sectionGroups: Record<string, string[]> = {};
+
+  changedSections.forEach((path) => {
+    const topLevel = path.split(".")[0];
+    if (!sectionGroups[topLevel]) {
+      sectionGroups[topLevel] = [];
+    }
+    sectionGroups[topLevel].push(path);
   });
-  
-  return `I've updated ${changedSections.length} section${changedSections.length > 1 ? 's' : ''} based on your feedback:\n\n${summaries.join('\n')}`;
+
+  // Convert section names to human-readable format
+  const sections = Object.keys(sectionGroups).map((section) => {
+    return section.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  });
+
+  const summaries = Object.entries(sectionGroups).map(([section, paths]) => {
+    const humanSection = section
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    if (paths.length === 1) {
+      return `• **${humanSection}**: Updated`;
+    }
+    return `• **${humanSection}**: ${paths.length} changes made`;
+  });
+
+  return {
+    sections,
+    summary: `These sections had been updated: ${
+      Object.keys(sectionGroups).length
+    } section${
+      Object.keys(sectionGroups).length > 1 ? "s" : ""
+    } based on your feedback:\n\n${summaries.join("\n")}`,
+  };
 }

@@ -1,20 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "@/components/ui/Navbar";
 import IntakeForm from "@/components/forms/IntakeForm";
 import Loader from "@/components/ui/Loader";
 import Modal from "@/components/ui/Modal";
-import Chatbot from "@/components/forms/Chatbot";
-
-interface User {
-    id: string;
-    firstname: string;
-    lastname: string;
-    email: string;
-    createdAt: Date;
-}
+import { useUser, User } from "@/context/UserContext";
 
 interface AnalysisResult {
     preview: {
@@ -79,17 +71,58 @@ interface AnalysisResult {
     classification: any;
 }
 
+interface IntakeFormData {
+    companyName: string;
+    website: string;
+    businessGoal: string;
+    tasks: string[];
+    outcome90Day: string;
+    weeklyHours: string;
+    timezone: string;
+    dailyOverlap: string;
+    clientFacing: string;
+    tools: string;
+    englishLevel: string;
+    budgetBand: string;
+    requirements: string[];
+    existingSOPs: string;
+    examplesURL: string;
+    reportingExpectations: string;
+    managementStyle: string;
+    securityNeeds: string;
+    dealBreakers: string;
+    roleSplit: string;
+    niceToHaveSkills: string;
+}
+
 export default function DashboardClient({ user }: { user: User }) {
+    //Analysis States
     const [showForm, setShowForm] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [intakeData, setIntakeData] = useState<IntakeFormData | null>(null);
     const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+
+    //Modal states
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [showDownloadModal, setShowDownloadModal] = useState(false);
     const [showRefineAnalysisModal, setShowRefineAnalysisModal] = useState(false);
+    const [showSaveResultModal, setShowSaveResultModal] = useState(false);
+
+    //Save Analysis States
+    const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [savedAnalysisId, setSavedAnalysisId] = useState<string | null>(null);
+
+    //New Analysis State
     const [formKey, setFormKey] = useState(0);
+
+    //Refinement States
     const [refineSectionIndex, setRefineSectionIndex] = useState(0);
     const [refineFeedback, setRefineFeedback] = useState<Record<string, { satisfied: boolean | null; feedback: string }>>({});
+    const [isRefineSubmitting, setIsRefineSubmitting] = useState(false);
+    const [refineSubmitError, setRefineSubmitError] = useState<string | null>(null);
+    const [refineResult, setRefineResult] = useState<{ success: boolean; message: string; sections?: string[] } | null>(null);
 
+    //Greeting based on time of day
     const getCurrentGreeting = () => {
         const hour = new Date().getHours();
         if (hour < 12) return `Good morning, ${user.firstname}`;
@@ -97,15 +130,19 @@ export default function DashboardClient({ user }: { user: User }) {
         return `Good evening, ${user.firstname}`;
     };
 
-    const handleFormSuccess = (data: AnalysisResult) => {
+    //Handle Analysis Submission
+    const handleFormSuccess = ({ apiResult, input }: { apiResult: AnalysisResult; input: IntakeFormData }) => {
         setIsProcessing(true);
-        setAnalysisResult(data);
+        setAnalysisResult(apiResult);
+        setIntakeData(input);
+        setSavedAnalysisId(null);
 
         setTimeout(() => {
             setIsProcessing(false);
         }, 2000);
     };
 
+    //Handle New Analysis - clears existing analysis if present
     const handleNewAnalysis = () => {
         if (analysisResult) {
             setShowConfirmModal(true);
@@ -118,6 +155,7 @@ export default function DashboardClient({ user }: { user: User }) {
     const handleConfirmNewAnalysis = () => {
         setAnalysisResult(null);
         setShowConfirmModal(false);
+        setSavedAnalysisId(null);
         try {
             localStorage.removeItem(`jd-form-data-${user.id}`);
         } catch (error) {
@@ -127,18 +165,21 @@ export default function DashboardClient({ user }: { user: User }) {
         setShowForm(true);
     };
 
+    //Handle Refinement - opens the refinement modal
     const handleRefineAnalysis = () => {
         if (analysisResult) {
+            setRefineSubmitError(null);
             setShowRefineAnalysisModal(true);
         } else {
             setShowForm(true);
         }
     }
 
+    //Opens the download modal
     const openDownload = () => {
         setShowDownloadModal(true)
     };
-
+    // Download Analysis as PDF
     const handleDownload = async () => {
         if (!analysisResult) return;
 
@@ -170,8 +211,11 @@ export default function DashboardClient({ user }: { user: User }) {
         }
     };
 
+
+    //Get the primary role from analysis
     const primaryRole = analysisResult?.ai_analysis?.roles?.[0];
 
+    //Sections for refinement
     const refineSections = useMemo(() => {
         if (!analysisResult || !primaryRole) return [];
 
@@ -201,7 +245,7 @@ export default function DashboardClient({ user }: { user: User }) {
             ),
         });
 
-        
+
         if (primaryRole.core_outcomes && primaryRole.core_outcomes.length > 0) {
             sections.push({
                 id: 'outcomes',
@@ -210,7 +254,7 @@ export default function DashboardClient({ user }: { user: User }) {
                     <ul className="space-y-3">
                         {primaryRole.core_outcomes.map((outcome, index) => (
                             <li key={index} className="flex items-start gap-3">
-                                <span className="text-[#00FF87] mt-1 flex-shrink-0">•</span>
+                                <span className="text-[var(--primary)] mt-1 flex-shrink-0">•</span>
                                 <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">
                                     {outcome}
                                 </span>
@@ -230,7 +274,7 @@ export default function DashboardClient({ user }: { user: User }) {
                     <ul className="space-y-3">
                         {primaryRole.responsibilities.map((resp, index) => (
                             <li key={index} className="flex items-start gap-3">
-                                <span className="text-[#00FF87] mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[#00FF87]"></span>
+                                <span className="text-[var(--primary)] mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--primary)]"></span>
                                 <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1 leading-relaxed">
                                     {resp}
                                 </span>
@@ -273,7 +317,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                     {primaryRole.tools.map((tool, index) => (
                                         <span
                                             key={index}
-                                            className="px-3 py-1.5 bg-[#00FF87]/10 text-[#00FF87] rounded-lg text-xs font-medium border border-[#00FF87]/20"
+                                            className="px-3 py-1.5 bg-[var(--primary)]/10 text-[var(--primary)] rounded-lg text-xs font-medium border border-[var(--primary)]/20"
                                         >
                                             {tool}
                                         </span>
@@ -294,7 +338,7 @@ export default function DashboardClient({ user }: { user: User }) {
                     <ul className="space-y-2">
                         {primaryRole.kpis.map((kpi, index) => (
                             <li key={index} className="flex items-start gap-2">
-                                <span className="text-[#00FF87] mt-1">•</span>
+                                <span className="text-[var(--primary)] mt-1">•</span>
                                 <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">
                                     {kpi}
                                 </span>
@@ -310,7 +354,7 @@ export default function DashboardClient({ user }: { user: User }) {
                 id: 'service',
                 title: 'Service Recommendation',
                 content: (
-                    <div className="p-4 bg-[#00FF87]/5 border border-[#00FF87]/20 rounded-xl">
+                    <div className="p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-xl">
                         <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
                             {analysisResult.ai_analysis.service_recommendation.best_fit}
                         </p>
@@ -325,7 +369,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                 <ul className="space-y-1">
                                     {analysisResult.ai_analysis.service_recommendation.next_steps.map((step, index) => (
                                         <li key={index} className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                            <span className="text-[#00FF87] mt-1">→</span>
+                                            <span className="text-[var(--primary)] mt-1">→</span>
                                             <span>{step}</span>
                                         </li>
                                     ))}
@@ -340,7 +384,9 @@ export default function DashboardClient({ user }: { user: User }) {
         return sections;
     }, [analysisResult, primaryRole]);
 
+    //Handlers for refinement modal
     const handleRefineSectionChange = (direction: 'prev' | 'next') => {
+        setRefineSubmitError(null);
         if (direction === 'next' && refineSectionIndex < refineSections.length - 1) {
             setRefineSectionIndex(refineSectionIndex + 1);
         } else if (direction === 'prev' && refineSectionIndex > 0) {
@@ -369,18 +415,233 @@ export default function DashboardClient({ user }: { user: User }) {
         }));
     };
 
+    //Handle Save Analysis
+    const handleSave = useCallback(async (isAutomaticSave = false): Promise<string | null> => {
+        if (!analysisResult || !intakeData) {
+            setSaveResult({
+                success: false,
+                message: 'Nothing to save yet. Please generate an analysis first.',
+            });
+            setShowSaveResultModal(true);
+            return null;
+        }
+
+        try {
+            const title =
+                `${analysisResult.ai_analysis?.roles?.[0]?.title || 'Job Analysis'}` +
+                (intakeData.companyName ? ` - ${intakeData.companyName}` : '');
+            console.log("Is Automatic Save:", isAutomaticSave);
+            const response = await fetch('/api/jd/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: user.id,
+                    title,
+                    intakeData,
+                    analysis: analysisResult,
+                    isFinalized: !isAutomaticSave,
+                    finalizedAt: !isAutomaticSave ? new Date().toISOString() : null,
+                }),
+            });
+
+            const payload = await response.json().catch(() => null);
+
+            if (!response.ok || !payload?.success) {
+                throw new Error(payload?.error || 'Failed to save analysis');
+            }
+
+            const savedId = payload?.savedAnalysis?.id;
+            if (savedId) {
+                setSavedAnalysisId(String(savedId));
+            }
+
+            setSaveResult({
+                success: true,
+                message: isAutomaticSave
+                    ? 'Automatically saved the analysis before refining it.'
+                    : 'Analysis saved successfully.',
+            });
+            setShowSaveResultModal(true);
+            return savedId ? String(savedId) : null;
+        } catch (error: any) {
+            console.error('Save error:', error);
+            setSaveResult({
+                success: false,
+                message:
+                    error?.message || 'Failed to save analysis. Please try again.',
+            });
+            setShowSaveResultModal(true);
+            return null;
+        }
+    }, [analysisResult, intakeData, user.id]);
+
+
+    //Ensure we have a saved analysis ID before refinement submission, and save if not
+    const ensureSavedAnalysisId = useCallback(async (): Promise<string | null> => {
+        if (savedAnalysisId) {
+            console.log("Using existing savedAnalysisId:", savedAnalysisId);
+            return savedAnalysisId;
+        }
+
+        if (analysisResult && intakeData) {
+            console.log("No savedAnalysisId found - saving current analysis as draft");
+            const newSavedId = await handleSave(true);
+
+            if (newSavedId) {
+                console.log("Saved current analysis for refinement:", newSavedId);
+                return newSavedId;
+            } else {
+                console.error("Failed to save current analysis");
+                return null;
+            }
+        }
+
+        console.error("No current analysis available to save for refinement");
+        return null;
+    }, [savedAnalysisId, user.id, analysisResult, intakeData, handleSave]);
+
+    //Close the refinement modal
     const handleRefineModalClose = () => {
         setShowRefineAnalysisModal(false);
-        setRefineSectionIndex(0);
-        setRefineFeedback({});
     };
 
-    const handleRefineSubmit = () => {
+    const handleRefineReset = (preserveResult = false) => {
+        setRefineSectionIndex(0);
+        setRefineFeedback({});
+        setRefineSubmitError(null);
+        setIsRefineSubmitting(false);
+        if (!preserveResult) {
+            setRefineResult(null);
+        }
+    };
+
+    //Submit refinement feedback
+    const handleRefineSubmit = async () => {
+        if (refineSections.length === 0) {
+            setRefineSubmitError("No sections are available for refinement right now.");
+            return;
+        }
+
         if (refineSectionIndex < refineSections.length - 1) {
             handleRefineSectionChange('next');
-        } else {
-            console.log('Refine feedback:', refineFeedback);
-            handleRefineModalClose();
+            return;
+        }
+
+        if (isRefineSubmitting) {
+            return;
+        }
+
+        const actionableFeedback = Object.entries(refineFeedback).filter(
+            ([, value]) => value?.satisfied === false
+        );
+
+        if (actionableFeedback.length === 0) {
+            setRefineSubmitError("Please mark at least one section as not satisfied and provide feedback before submitting.");
+            return;
+        }
+
+        const targetAnalysisId = await ensureSavedAnalysisId();
+        console.log(`Target analysis: ${targetAnalysisId}`);
+
+        if (!targetAnalysisId) {
+            setRefineSubmitError("No saved analysis found. Please save your analysis before submitting refinements.");
+            return;
+        }
+
+        const messageLines = actionableFeedback.map(([sectionId, value]) => {
+            const sectionTitle = refineSections.find(section => section.id === sectionId)?.title || sectionId;
+            const feedbackText = value?.feedback?.trim()
+                ? value.feedback.trim()
+                : "No specific feedback provided, but this section needs improvement.";
+            return `Section "${sectionTitle}": ${feedbackText}`;
+        });
+
+        const message = `Please apply the following refinement feedback:\n${messageLines.join("\n")}`;
+
+        setIsRefineSubmitting(true);
+        setRefineSubmitError(null);
+
+        try {
+            const response = await fetch('/api/jd/refine', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    userId: user.id,
+                    analysisId: targetAnalysisId,
+                    message,
+                }),
+            });
+
+            const payload = await response.json().catch(() => null);
+
+            if (!response.ok || !payload?.success) {
+                const errorMessage = payload?.error || payload?.details || 'Failed to refine analysis';
+                throw new Error(errorMessage);
+            }
+
+            const updatedAnalysis = payload?.data?.updatedAnalysis;
+            if (updatedAnalysis) {
+                setAnalysisResult(prev => {
+                    if (updatedAnalysis?.ai_analysis || updatedAnalysis?.preview || updatedAnalysis?.classification) {
+                        const nextPreview =
+                            (updatedAnalysis as any)?.preview ||
+                            prev?.preview ||
+                            ({} as AnalysisResult["preview"]);
+                        const nextAiAnalysis =
+                            (updatedAnalysis as any)?.ai_analysis || updatedAnalysis;
+                        const nextClassification =
+                            (updatedAnalysis as any)?.classification ??
+                            prev?.classification ??
+                            null;
+
+                        if (!prev) {
+                            return {
+                                preview: nextPreview,
+                                ai_analysis: nextAiAnalysis,
+                                classification: nextClassification,
+                            } as AnalysisResult;
+                        }
+
+                        return {
+                            ...prev,
+                            preview: nextPreview,
+                            ai_analysis: nextAiAnalysis,
+                            classification: nextClassification,
+                        };
+                    }
+
+                    if (!prev) {
+                        return {
+                            preview: {} as AnalysisResult["preview"],
+                            ai_analysis: updatedAnalysis as AnalysisResult["ai_analysis"],
+                            classification: null,
+                        } as AnalysisResult;
+                    }
+
+                    return {
+                        ...prev,
+                        ai_analysis: updatedAnalysis as AnalysisResult["ai_analysis"],
+                    };
+                });
+            }
+
+            setRefineResult({
+                success: true,
+                message: payload?.data?.summary || 'Refinement applied successfully.',
+                sections: payload?.data?.changedSectionNames || [],
+            });
+            console.log("Refinement result:", payload?.data);
+            setShowRefineAnalysisModal(false);
+            setRefineSectionIndex(0);
+            setRefineFeedback({});
+            setRefineSubmitError(null);
+        } catch (error: any) {
+            console.error('Refine error:', error);
+            setRefineSubmitError(error?.message || 'Failed to submit refinement. Please try again.');
+        } finally {
+            setIsRefineSubmitting(false);
         }
     };
 
@@ -389,7 +650,8 @@ export default function DashboardClient({ user }: { user: User }) {
             <Navbar />
 
             {/* Main Content */}
-            <div className="mx-auto max-w-7xl px-4 pt-24 md:pt-32 pb-16">
+            <div className="mx-auto max-w-7xl px-4 pt-12 md:pt-16 pb-16"
+            >
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* Left Column - Dashboard */}
                     <div className="space-y-8">
@@ -407,10 +669,10 @@ export default function DashboardClient({ user }: { user: User }) {
                                 onClick={() => setShowForm(true)}
                                 className="w-full group relative overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 text-left transition-all hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-lg"
                             >
-                                <div className="flex items-start gap-4">
-                                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#00FF87]/10 flex items-center justify-center ring-1 ring-[#00FF87]/30 shadow-[0_0_20px_#00FF87]/20 transition-all group-hover:shadow-[0_0_30px_#00FF87]/40">
+                                <div className="flex items-start gap-4 group">
+                                    <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-[var(--accent)]/10 flex items-center justify-center ring-1 ring-[var(--accent)]/30 shadow-[0_0_20px_var(--accent)/20] transition-all group-hover:shadow-[0_0_30px_var(--accent)/40]">
                                         <svg
-                                            className="w-6 h-6 text-[#00FF87]"
+                                            className="w-6 h-6 text-[var(--accent)]"
                                             fill="none"
                                             stroke="currentColor"
                                             viewBox="0 0 24 24"
@@ -424,7 +686,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         </svg>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <h3 className="text-base font-medium text-zinc-900 dark:text-zinc-100 mb-1">
+                                        <h3 className="text-base font-medium text-[var(--primary)] dark:text-zinc-100 mb-1">
                                             Answer our form for us to better assess your needs
                                         </h3>
                                         <p className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -432,7 +694,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         </p>
                                     </div>
                                     <svg
-                                        className="w-5 h-5 text-zinc-400 dark:text-zinc-600 group-hover:text-zinc-600 dark:group-hover:text-zinc-400 transition-colors flex-shrink-0"
+                                        className="w-5 h-5 text-zinc-400 dark:text-zinc-600 group-hover:text-[var(--accent)] dark:group-hover:text-[var(--accent)] transition-colors flex-shrink-0"
                                         fill="none"
                                         stroke="currentColor"
                                         viewBox="0 0 24 24"
@@ -440,6 +702,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                     </svg>
                                 </div>
+
                             </button>
                         </div>
 
@@ -453,7 +716,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                     transition={{ duration: 0.4, ease: "easeOut" }}
                                     className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm"
                                 >
-                                    <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
+                                    <h3 className="text-lg font-semibold text-[var(--primary)] dark:[var(--primary)]-zinc-100 mb-3">
                                         What You Told Us
                                     </h3>
                                     <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
@@ -463,6 +726,53 @@ export default function DashboardClient({ user }: { user: User }) {
                                 </motion.div>
                             )}
                         </AnimatePresence>
+
+                        <AnimatePresence>
+                            {refineResult?.success && (
+                                <motion.div
+                                    key="refine-success"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.4, ease: "easeOut" }}
+                                    className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm relative"
+                                >
+                                    <button
+                                        onClick={() => setRefineResult(null)}
+                                        className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+                                        aria-label="Dismiss"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                    <h3 className="text-lg font-semibold text-[var(--primary)] dark:text-[var(--primary)]-100 mb-3 pr-8">
+                                        Refinements Applied
+                                    </h3>
+                                    {refineResult.sections && refineResult.sections.length > 0 && (
+                                        <div className="mb-3">
+                                            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">
+                                                Updated Sections
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {refineResult.sections.map((section, index) => (
+                                                    <span
+                                                        key={index}
+                                                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 text-zinc-700 dark:text-zinc-300"
+                                                    >
+                                                        {section}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                                        {refineResult.message}
+                                    </p> */}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
                     </div>
 
                     {/* Right Column - Results */}
@@ -594,6 +904,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                 <div className="relative group">
                                                     <button
                                                         className="w-9 h-9 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200"
+                                                        onClick={() => handleSave()}
                                                     >
                                                         <svg
                                                             className="w-4 h-4"
@@ -627,9 +938,10 @@ export default function DashboardClient({ user }: { user: User }) {
                                                     <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">
                                                         Recommended Role
                                                     </p>
-                                                    <h4 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+                                                    <h4 className="text-xl font-semibold text-[var(--primary)] dark:text-zinc-100 mb-1">
                                                         {primaryRole.title}
                                                     </h4>
+
                                                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
                                                         {primaryRole.family} • {primaryRole.service}
                                                     </p>
@@ -648,13 +960,14 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Core Outcomes */}
                                         {primaryRole?.core_outcomes && primaryRole.core_outcomes.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Core Outcomes (90 Days)
                                                 </p>
+
                                                 <ul className="space-y-2">
                                                     {primaryRole.core_outcomes.map((outcome, index) => (
                                                         <li key={index} className="flex items-start gap-3">
-                                                            <span className="text-[#00FF87] mt-1 flex-shrink-0">•</span>
+                                                            <span className="text-[var(--primary)] mt-1 flex-shrink-1">•</span>
                                                             <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">
                                                                 {outcome}
                                                             </span>
@@ -667,13 +980,13 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Responsibilities */}
                                         {primaryRole?.responsibilities && primaryRole.responsibilities.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Key Responsibilities
                                                 </p>
                                                 <ul className="space-y-3">
                                                     {primaryRole.responsibilities.map((resp, index) => (
                                                         <li key={index} className="flex items-start gap-3">
-                                                            <span className="text-[#00FF87] mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[#00FF87]"></span>
+                                                            <span className="text-[var(--accent)] mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--primary)]"></span>
                                                             <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1 leading-relaxed">
                                                                 {resp}
                                                             </span>
@@ -686,7 +999,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Skills */}
                                         {primaryRole?.skills && primaryRole.skills.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Required Skills
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
@@ -705,14 +1018,14 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Tools */}
                                         {primaryRole?.tools && primaryRole.tools.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Tools & Technologies
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
                                                     {primaryRole.tools.map((tool, index) => (
                                                         <span
                                                             key={index}
-                                                            className="px-3 py-1.5 bg-[#00FF87]/10 text-[#00FF87] rounded-lg text-xs font-medium border border-[#00FF87]/20"
+                                                            className="px-3 py-1.5 bg-[var(--primary)]/10 text-[var(--primary)] rounded-lg text-xs font-medium border border-[var(--primary)]/20"
                                                         >
                                                             {tool}
                                                         </span>
@@ -724,13 +1037,13 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* KPIs */}
                                         {primaryRole?.kpis && primaryRole.kpis.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Key Performance Indicators
                                                 </p>
                                                 <ul className="space-y-2">
                                                     {primaryRole.kpis.map((kpi, index) => (
                                                         <li key={index} className="flex items-start gap-2">
-                                                            <span className="text-[#00FF87] mt-1">•</span>
+                                                            <span className="text-[var(--primary)] mt-1">•</span>
                                                             <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">
                                                                 {kpi}
                                                             </span>
@@ -743,7 +1056,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Personality Traits */}
                                         {primaryRole?.personality && primaryRole.personality.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Personality Fit
                                                 </p>
                                                 <ul className="space-y-2">
@@ -762,7 +1075,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Sample Week */}
                                         {primaryRole?.sample_week && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     Sample Week
                                                 </p>
                                                 <div className="space-y-3">
@@ -785,7 +1098,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                             <div className="space-y-3">
                                                 {primaryRole.overlap_requirements && (
                                                     <div>
-                                                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">
+                                                        <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                             Overlap Requirements
                                                         </p>
                                                         <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
@@ -808,8 +1121,8 @@ export default function DashboardClient({ user }: { user: User }) {
 
                                         {/* Service Recommendation */}
                                         {analysisResult.ai_analysis.service_recommendation && (
-                                            <div className="p-4 bg-[#00FF87]/5 border border-[#00FF87]/20 rounded-xl">
-                                                <p className="text-xs font-medium text-[#00FF87] mb-2 uppercase tracking-wide">
+                                            <div className="p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-xl">
+                                                <p className="text-xs font-medium text-[var(--primary)] mb-2 uppercase tracking-wide">
                                                     Service Recommendation
                                                 </p>
                                                 <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
@@ -826,7 +1139,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                         <ul className="space-y-1">
                                                             {analysisResult.ai_analysis.service_recommendation.next_steps.map((step, index) => (
                                                                 <li key={index} className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                                                    <span className="text-[#00FF87] mt-1">→</span>
+                                                                    <span className="text-[var(--primary)] mt-1">→</span>
                                                                     <span>{step}</span>
                                                                 </li>
                                                             ))}
@@ -839,7 +1152,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {/* Onboarding Plan */}
                                         {analysisResult.ai_analysis.onboarding_2w && (
                                             <div>
-                                                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">
+                                                <p className="text-xs font-bold text-[var(--accent)] dark:text-[var(--accent)]-400 mb-3 uppercase tracking-wide">
                                                     2-Week Onboarding Plan
                                                 </p>
                                                 <div className="space-y-4">
@@ -851,7 +1164,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                             <ul className="space-y-2">
                                                                 {analysisResult.ai_analysis.onboarding_2w.week_1.map((task, index) => (
                                                                     <li key={index} className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                                                        <span className="text-[#00FF87] mt-1">•</span>
+                                                                        <span className="text-[var(--primary)] mt-1">•</span>
                                                                         <span>{task}</span>
                                                                     </li>
                                                                 ))}
@@ -866,7 +1179,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                             <ul className="space-y-2">
                                                                 {analysisResult.ai_analysis.onboarding_2w.week_2.map((task, index) => (
                                                                     <li key={index} className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                                                                        <span className="text-[#00FF87] mt-1">•</span>
+                                                                        <span className="text-[var(--primary)] mt-1">•</span>
                                                                         <span>{task}</span>
                                                                     </li>
                                                                 ))}
@@ -881,15 +1194,15 @@ export default function DashboardClient({ user }: { user: User }) {
                                         {(analysisResult.ai_analysis.risks?.length > 0 || analysisResult.ai_analysis.assumptions?.length > 0) && (
                                             <div className="space-y-4">
                                                 {analysisResult.ai_analysis.risks?.length > 0 && (
-                                                    <div className="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl">
-                                                        <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-3 uppercase tracking-wide">
+                                                    <div className="p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-xl">
+                                                        <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
                                                             Risks & Considerations
                                                         </p>
                                                         <ul className="space-y-2">
                                                             {analysisResult.ai_analysis.risks.map((risk, index) => (
                                                                 <li key={index} className="flex items-start gap-2">
-                                                                    <span className="text-amber-600 dark:text-amber-400 mt-1">•</span>
-                                                                    <span className="text-sm text-amber-800 dark:text-amber-300 flex-1">
+                                                                    <span className="text-black dark:text-black mt-1">•</span>
+                                                                    <span className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
                                                                         {risk}
                                                                     </span>
                                                                 </li>
@@ -898,15 +1211,15 @@ export default function DashboardClient({ user }: { user: User }) {
                                                     </div>
                                                 )}
                                                 {analysisResult.ai_analysis.assumptions?.length > 0 && (
-                                                    <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl">
-                                                        <p className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-3 uppercase tracking-wide">
+                                                    <div className="p-4 bg-[var(--primary)]/5 border border-[var(--primary)]/20 rounded-xl">
+                                                        <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
                                                             Assumptions
                                                         </p>
                                                         <ul className="space-y-2">
                                                             {analysisResult.ai_analysis.assumptions.map((assumption, index) => (
                                                                 <li key={index} className="flex items-start gap-2">
                                                                     <span className="text-blue-600 dark:text-blue-400 mt-1">•</span>
-                                                                    <span className="text-sm text-blue-800 dark:text-blue-300 flex-1">
+                                                                    <span className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
                                                                         {assumption}
                                                                     </span>
                                                                 </li>
@@ -931,7 +1244,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                 >
                                     <div className="text-zinc-400 dark:text-zinc-600 mb-4">
                                         <svg
-                                            className="w-16 h-16 mx-auto"
+                                            className="w-16 h-16 mx-auto text-[var(--accent)]"
                                             fill="none"
                                             stroke="currentColor"
                                             viewBox="0 0 24 24"
@@ -943,6 +1256,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                 d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                                             />
                                         </svg>
+
                                     </div>
                                     <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
                                         No analysis yet
@@ -1010,17 +1324,56 @@ export default function DashboardClient({ user }: { user: User }) {
             {/* Refine Analysis Modal */}
             <Modal
                 isOpen={showRefineAnalysisModal}
-                onClose={handleRefineModalClose}
+                onClose={() => {
+                    handleRefineModalClose();
+                    // Preserve result if submission was successful
+                    handleRefineReset(refineResult?.success === true);
+                }}
                 onConfirm={handleRefineSubmit}
                 title="Refine Analysis"
                 message="Review each section and provide feedback on what needs improvement."
-                confirmText={refineSectionIndex === refineSections.length - 1 ? "Submit Refinement" : "Next"}
+                confirmText={
+                    // Replace plain text with a React node
+                    refineSectionIndex === refineSections.length - 1 ? (
+                        isRefineSubmitting ? (
+                            <div className="flex items-center gap-2">
+                                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                    <circle
+                                        className="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        strokeWidth="4"
+                                        fill="none"
+                                    />
+                                    <path
+                                        className="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                    />
+                                </svg>
+                                <span>Submitting...</span>
+                            </div>
+                        ) : (
+                            "Submit Refinement"
+                        )
+                    ) : (
+                        "Next"
+                    )
+                }
                 cancelText="Cancel"
                 confirmVariant="primary"
                 maxWidth="4xl"
                 body={
                     refineSections.length > 0 && (
                         <div className="space-y-6">
+                            {refineSubmitError && (
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                                    {refineSubmitError}
+                                </div>
+                            )}
+
                             {/* Progress Indicator */}
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-zinc-600 dark:text-zinc-400">
@@ -1031,8 +1384,8 @@ export default function DashboardClient({ user }: { user: User }) {
                                         <div
                                             key={index}
                                             className={`h-1.5 rounded-full transition-all ${index <= refineSectionIndex
-                                                    ? 'bg-[#00FF87] w-8'
-                                                    : 'bg-zinc-200 dark:bg-zinc-800 w-1.5'
+                                                ? 'bg-[var(--primary)] w-8'
+                                                : 'bg-zinc-200 dark:bg-zinc-800 w-1.5'
                                                 }`}
                                         />
                                     ))}
@@ -1067,8 +1420,8 @@ export default function DashboardClient({ user }: { user: User }) {
                                             <button
                                                 onClick={() => handleRefineSatisfaction(refineSections[refineSectionIndex].id, true)}
                                                 className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-all ${refineFeedback[refineSections[refineSectionIndex].id]?.satisfied === true
-                                                        ? 'bg-[#00FF87] text-zinc-900 border-2 border-[#00FF87]'
-                                                        : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                                    ? 'bg-[var(--primary)] text-white border-2 border-[var(--primary)]'
+                                                    : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                                                     }`}
                                             >
                                                 Yes
@@ -1076,8 +1429,8 @@ export default function DashboardClient({ user }: { user: User }) {
                                             <button
                                                 onClick={() => handleRefineSatisfaction(refineSections[refineSectionIndex].id, false)}
                                                 className={`flex-1 px-4 py-3 rounded-lg text-sm font-medium transition-all ${refineFeedback[refineSections[refineSectionIndex].id]?.satisfied === false
-                                                        ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-2 border-red-300 dark:border-red-700'
-                                                        : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                                    ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border-2 border-red-300 dark:border-red-700'
+                                                    : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                                                     }`}
                                             >
                                                 No
@@ -1100,7 +1453,7 @@ export default function DashboardClient({ user }: { user: User }) {
                                                     onChange={(e) => handleRefineFeedbackChange(refineSections[refineSectionIndex].id, e.target.value)}
                                                     placeholder="Describe your suggestions or improvements..."
                                                     rows={4}
-                                                    className="w-full px-4 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-[#00FF87]/30 focus:border-[#00FF87] transition-all"
+                                                    className="w-full px-4 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30 focus:border-[var(--primary)] transition-all"
                                                 />
                                             </motion.div>
                                         )}
@@ -1114,8 +1467,8 @@ export default function DashboardClient({ user }: { user: User }) {
                                     onClick={() => handleRefineSectionChange('prev')}
                                     disabled={refineSectionIndex === 0}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${refineSectionIndex === 0
-                                            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-                                            : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                        ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                                        : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                                         }`}
                                 >
                                     <div className="flex items-center gap-2">
@@ -1128,18 +1481,28 @@ export default function DashboardClient({ user }: { user: User }) {
                                 <button
                                     onClick={() => handleRefineSectionChange('next')}
                                     disabled={refineSectionIndex === refineSections.length - 1}
-                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${refineSectionIndex === refineSections.length - 1
-                                            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
-                                            : 'bg-[#00FF87] text-zinc-900 hover:brightness-110'
-                                        }`}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2
+    ${refineSectionIndex === refineSections.length - 1
+                                            ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                                            : 'bg-[var(--primary)] text-white hover:brightness-110'}
+  `}
                                 >
-                                    <div className="flex items-center gap-2">
-                                        Next
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                        </svg>
-                                    </div>
+                                    <span>Next</span>
+                                    <svg
+                                        className="w-4 h-4 text-white"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
                                 </button>
+
                             </div>
                         </div>
                     )
@@ -1157,6 +1520,19 @@ export default function DashboardClient({ user }: { user: User }) {
                 cancelText="Cancel"
                 confirmVariant="primary"
             />
+
+            {/* Save Result Modal */}
+            <Modal
+                isOpen={showSaveResultModal}
+                onClose={() => setShowSaveResultModal(false)}
+                onConfirm={() => setShowSaveResultModal(false)}
+                title={saveResult?.success ? "Saved Successfully" : "Save Failed"}
+                message={saveResult?.message || ""}
+                confirmText="OK"
+                cancelText="Close"
+                confirmVariant={saveResult?.success ? "primary" : "danger"}
+            />
+
 
 
         </div>

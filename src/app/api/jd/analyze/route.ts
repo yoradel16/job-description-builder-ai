@@ -547,7 +547,7 @@ Respond ONLY with the complete JSON object. No markdown, no explanations outside
     });
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -572,8 +572,10 @@ Respond ONLY with the complete JSON object. No markdown, no explanations outside
       recommended_role: aiAnalysis.roles?.[0]?.title || "Unknown",
       role_purpose: aiAnalysis.roles?.[0]?.purpose || "",
       service_mapping: serviceMapping.service,
-      weekly_hours: aiAnalysis.roles?.[0]?.hours_per_week || intake_json.weekly_hours,
-      client_facing: aiAnalysis.roles?.[0]?.client_facing ?? intake_json.client_facing,
+      weekly_hours:
+        aiAnalysis.roles?.[0]?.hours_per_week || intake_json.weekly_hours,
+      client_facing:
+        aiAnalysis.roles?.[0]?.client_facing ?? intake_json.client_facing,
       core_outcomes: aiAnalysis.roles?.[0]?.core_outcomes || [],
       kpis: aiAnalysis.roles?.[0]?.kpis || [],
       key_tools: aiAnalysis.roles?.[0]?.tools?.slice(0, 5) || [],

@@ -229,8 +229,12 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
             // Pass data to parent and close form
             if (onSuccess) {
-                onSuccess(data);
+                onSuccess({
+                    apiResult: data,
+                    input: formData,
+                });
             }
+
 
             // Close form after a brief delay to show success message
             setTimeout(() => {
@@ -245,8 +249,8 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
         }
     };
 
-    const inputClasses = "w-full px-3 py-2.5 bg-white/10 border border-white/10 rounded-lg text-sm text-neutral-200 placeholder-neutral-400 transition-all focus:outline-none focus:ring-2 focus:ring-[#00FF87]/30 focus:border-[#00FF87] hover:border-white/20";
-    const labelClasses = "block text-sm font-medium text-neutral-300 mb-2";
+    const inputClasses = "w-full px-3 py-2.5 bg-white border border-neutral-200 rounded-lg text-sm text-neutral-900 placeholder-neutral-500 transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30 focus:border-[var(--accent)] hover:border-neutral-300";
+    const labelClasses = "block text-sm font-medium text-black-300 mb-2";
     const sectionClasses = "space-y-5";
     const classNames = (...classes: (string | boolean | undefined)[]) => classes.filter(Boolean).join(" ");
 
@@ -268,17 +272,17 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                     <div className="relative z-[60]">
                         <Listbox.Button
                             className={classNames(
-                                "w-full px-3 py-2.5 rounded-lg text-left",
-                                "bg-white/10 border border-white/10 text-neutral-200",
-                                "placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-[#00FF87]/30 focus:border-[#00FF87]",
-                                "hover:border-white/20 transition-all"
+                                "w-full px-3 py-2.5 rounded-lg text-left text-sm", // <-- added text-sm
+                                "bg-white border border-neutral-300 text-black",
+                                "placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30 focus:border-[var(--accent)]",
+                                "hover:border-[var(--accent)] transition-all"
                             )}
                         >
-                            <span className="block truncate">
+                            <span className="block truncate text-sm"> {/* <-- added text-sm */}
                                 {selected ? selected.label : (placeholder || "Select")}
                             </span>
                             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                                <ChevronUpDownIcon className="h-5 w-5 text-neutral-300" aria-hidden="true" />
+                                <ChevronUpDownIcon className="h-5 w-5 text-neutral-500" aria-hidden="true" />
                             </span>
                         </Listbox.Button>
 
@@ -293,25 +297,27 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                             leaveTo="opacity-0 scale-95"
                         >
                             <Listbox.Options
-                                className="absolute z-[9999] mt-1 max-h-60 w-full overflow-auto rounded-lg bg-neutral-900 border border-white/10 py-1 text-sm shadow-[0_10px_30px_rgba(0,0,0,0.35)] focus:outline-none"
+                                className="absolute z-[9999] mt-1 max-h-60 w-full overflow-auto rounded-lg bg-white border border-neutral-300 py-1 text-sm shadow-lg focus:outline-none"
                             >
                                 {options.map((opt) => (
                                     <Listbox.Option
                                         key={String(opt.value)}
                                         className={({ active }) => classNames(
-                                            "relative cursor-pointer select-none py-2 pl-9 pr-3",
-                                            active ? "bg-white/10 text-white" : "text-neutral-200"
+                                            "relative cursor-pointer select-none py-2 pl-9 pr-3 text-sm", // <-- added text-sm
+                                            active ? "bg-[var(--accent)]/20 text-black" : "text-black"
                                         )}
                                         value={opt}
                                     >
                                         {({ selected: isSelected }) => (
                                             <>
-                                                <span className={classNames("block truncate", isSelected && "text-[#00FF87]")}>{opt.label}</span>
-                                                {isSelected ? (
-                                                    <span className="absolute inset-y-0 left-2 flex items-center text-[#00FF87]">
+                                                <span className={classNames("block truncate text-sm", isSelected && "text-[var(--accent)]")}>
+                                                    {opt.label}
+                                                </span>
+                                                {isSelected && (
+                                                    <span className="absolute inset-y-0 left-2 flex items-center text-[var(--accent)]">
                                                         <CheckIcon className="h-4 w-4" aria-hidden="true" />
                                                     </span>
-                                                ) : null}
+                                                )}
                                             </>
                                         )}
                                     </Listbox.Option>
@@ -323,7 +329,6 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
             </Listbox>
         );
     }
-
 
     return (
         <div className="h-full overflow-y-auto">
@@ -337,45 +342,56 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
             </button> */}
             <div className="max-w-2xl mx-auto p-6 space-y-8 isolate">
                 {/* Header */}
-                {/* <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between">
                     <div>
                         <h1 className="text-xl font-semibold text-white">Tell us more about your business</h1>
-                        <p className="text-sm text-neutral-400 mt-1">Fill out the details below to generate your job description</p>
+                        <p className="text-sm text-white mt-1">
+                            Fill out the details below to generate your job description
+                        </p>
                     </div>
                     <button
                         onClick={handleClearForm}
-                        className="text-sm text-neutral-400 hover:text-white transition-colors"
+                        className="ml-4 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[var(--accent)] hover:brightness-110 transition-all"
                     >
-                        Clear all
+                        Clear Form
                     </button>
-                </div> */}
+
+                </div>
+
 
                 {/* Progress Indicator */}
-                <div className="bg-white/5 backdrop-blur rounded-xl p-4 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
+                <div className="bg-white rounded-xl p-4 shadow-md border border-neutral-200">
                     <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-neutral-300">
+                        <span className="text-sm font-medium text-neutral-500">
                             Step {currentStep + 1} of {steps.length}
                         </span>
                         <span className="text-sm text-neutral-400">
                             {steps[currentStep].title}
                         </span>
                     </div>
-                    <div className="w-full bg-white/10 rounded-full h-2">
+
+                    {/* Progress bar background */}
+                    <div className="w-full bg-neutral-200 rounded-full h-2">
                         <div
-                            className="bg-[#00FF87] h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${((currentStep + 1) / steps.length) * 100}%` }}
+                            className="h-2 rounded-full transition-all duration-300"
+                            style={{
+                                width: `${((currentStep + 1) / steps.length) * 100}%`,
+                                backgroundColor: "var(--primary)",
+                            }}
                         />
                     </div>
+
+                    {/* Step indicators */}
                     <div className="flex gap-2 mt-4">
                         {steps.map((step, index) => (
                             <button
                                 key={step.id}
                                 onClick={() => setCurrentStep(index)}
                                 className={`
-                                    flex-1 h-1.5 rounded-full transition-all
-                                    ${index <= currentStep ? 'bg-[#00FF87]' : 'bg-white/10'}
-                                    ${index === currentStep ? 'ring-2 ring-[#00FF87]/50' : ''}
-                                `}
+                    flex-1 h-1.5 rounded-full transition-all
+                    ${index <= currentStep ? "bg-[var(--accent)]" : "bg-neutral-200"}
+                    ${index === currentStep ? "ring-2 ring-[var(--accent)]/50" : ""}
+                `}
                                 aria-label={`Go to step ${index + 1}: ${step.title}`}
                             />
                         ))}
@@ -384,10 +400,11 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                 {/* Step Content */}
                 <div className="min-h-[400px]">
+
                     {/* Step 0: Company Info */}
                     {currentStep === 0 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-4">Company Information</h3>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-4">Company Information</h3>
                             <div className={sectionClasses}>
                                 <div>
                                     <label className={labelClasses}>
@@ -418,8 +435,8 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 1: Business Goals */}
                     {currentStep === 1 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-4">Business Goals</h3>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-4">Business Goals</h3>
                             <div className={sectionClasses}>
                                 <div>
                                     <label className={labelClasses}>
@@ -458,18 +475,24 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 2: Key Tasks */}
                     {currentStep === 2 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-1">Key Tasks</h3>
-                            <p className="text-sm text-neutral-400 mb-4">List the top 3 tasks or any additional tasks this role will handle</p>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-1">Key Tasks</h3>
+                            <p className="text-sm text-neutral-500 mb-4">List the top 3 tasks or any additional tasks this role will handle</p>
                             <div className={sectionClasses}>
                                 {formData.tasks.map((task, index) => (
                                     <div key={index}>
                                         <label className={labelClasses}>
-                                            {index === 3 ? "Additional Tasks" : `Task ${index + 1}`} {index < 3 && <span className="text-red-500">*</span>}
+                                            {index === 3 ? "Additional Tasks" : `Task ${index + 1}`}{" "}
+                                            {index < 3 && <span className="text-red-500">*</span>}
                                         </label>
                                         <input
                                             type="text"
-                                            placeholder={`e.g., ${index === 0 ? 'Manage social media content' : index === 1 ? 'Respond to customer inquiries' : 'Create weekly reports'}`}
+                                            placeholder={`e.g., ${index === 0
+                                                ? "Manage social media content"
+                                                : index === 1
+                                                    ? "Respond to customer inquiries"
+                                                    : "Create weekly reports"
+                                                }`}
                                             value={task}
                                             onChange={(e) => handleTaskChange(index, e.target.value)}
                                             className={inputClasses}
@@ -483,8 +506,8 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 3: Work Details */}
                     {currentStep === 3 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-4">Work Details</h3>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-4">Work Details</h3>
                             <div className={sectionClasses}>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -560,9 +583,9 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 4: Requirements */}
                     {currentStep === 4 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-1">Requirements</h3>
-                            <p className="text-sm text-neutral-400 mb-4">Must-have skills and qualifications</p>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-1">Requirements</h3>
+                            <p className="text-sm text-neutral-500 mb-4">Must-have skills and qualifications</p>
                             <div className={sectionClasses}>
                                 {formData.requirements.map((req, index) => (
                                     <div key={index}>
@@ -571,7 +594,12 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                                         </label>
                                         <input
                                             type="text"
-                                            placeholder={`e.g., ${index === 0 ? '2+ years experience in social media' : index === 1 ? 'Proficient in Canva and Adobe Suite' : 'Experience with CRM systems'}`}
+                                            placeholder={`e.g., ${index === 0
+                                                ? "2+ years experience in social media"
+                                                : index === 1
+                                                    ? "Proficient in Canva and Adobe Suite"
+                                                    : "Experience with CRM systems"
+                                                }`}
                                             value={req}
                                             onChange={(e) => handleRequirementChange(index, e.target.value)}
                                             className={inputClasses}
@@ -585,8 +613,8 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 5: Tools & Skills */}
                     {currentStep === 5 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-4">Tools & Skills</h3>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-4">Tools & Skills</h3>
                             <div className={sectionClasses}>
                                 <div>
                                     <label className={labelClasses}>Tools/Stack in Use</label>
@@ -597,7 +625,7 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                                         className={inputClasses}
                                         rows={3}
                                     />
-                                    <p className="text-xs text-neutral-400 mt-1.5">List the tools and technologies your team uses</p>
+                                    <p className="text-xs text-neutral-500 mt-1.5">List the tools and technologies your team uses</p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -634,9 +662,9 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 6: Additional Details - Process */}
                     {currentStep === 6 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-1">Additional Details - Process</h3>
-                            <p className="text-sm text-neutral-400 mb-4">Optional information to refine your job description</p>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-1">Additional Details - Process</h3>
+                            <p className="text-sm text-neutral-500 mb-4">Optional information to refine your job description</p>
                             <div className={sectionClasses}>
                                 <div>
                                     <label className={labelClasses}>Existing SOPs?</label>
@@ -690,9 +718,9 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
 
                     {/* Step 7: Additional Details - Constraints */}
                     {currentStep === 7 && (
-                        <div className="bg-white/5 backdrop-blur rounded-xl p-6 shadow-[0_8px_24px_rgba(0,0,0,0.25)] border border-white/10">
-                            <h3 className="text-base font-semibold text-white mb-1">Additional Details - Constraints</h3>
-                            <p className="text-sm text-neutral-400 mb-4">Constraints and preferences</p>
+                        <div className="bg-white rounded-xl p-6 shadow-md border border-neutral-200">
+                            <h3 className="text-base font-semibold text-neutral-900 mb-1">Additional Details - Constraints</h3>
+                            <p className="text-sm text-neutral-500 mb-4">Constraints and preferences</p>
                             <div className={sectionClasses}>
                                 <div>
                                     <label className={labelClasses}>Security/Compliance Needs</label>
@@ -739,19 +767,21 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                             </div>
                         </div>
                     )}
+
                 </div>
 
+
                 {/* Navigation Buttons */}
-                <div className="pt-6 border-t border-white/10">
+                <div className="pt-6 border-t border-neutral-200">
                     <div className="flex flex-col gap-4">
                         {analysisError && (
-                            <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                                <p className="text-sm text-red-400">{analysisError}</p>
+                            <div className="px-4 py-3 rounded-lg bg-red-100 border border-red-200">
+                                <p className="text-sm text-red-600">{analysisError}</p>
                             </div>
                         )}
                         {analysisSuccess && (
-                            <div className="px-4 py-3 rounded-lg bg-[#00FF87]/10 border border-[#00FF87]/20">
-                                <p className="text-sm text-[#00FF87]">Analysis completed successfully!</p>
+                            <div className="px-4 py-3 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/30">
+                                <p className="text-sm text-[var(--accent)]">Analysis completed successfully!</p>
                             </div>
                         )}
 
@@ -761,12 +791,12 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                                 onClick={handleSubmitAnalysis}
                                 disabled={isAnalyzing}
                                 className={`
-                                    w-full px-4 py-2 rounded-lg text-sm font-medium
-                                    ${isAnalyzing
-                                        ? 'bg-neutral-700 text-neutral-300 cursor-not-allowed'
-                                        : 'bg-[#00FF87] text-neutral-900 hover:brightness-110'}
-                                    transition-all duration-200
-                                `}
+                    w-full px-4 py-2 rounded-lg text-sm font-medium
+                    ${isAnalyzing
+                                        ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                                        : 'bg-[var(--accent)] text-neutral-900 hover:brightness-110'}
+                    transition-all duration-200
+                `}
                             >
                                 <div className="flex items-center justify-center gap-2">
                                     {isAnalyzing ? (
@@ -793,11 +823,11 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                                     onClick={handlePrevious}
                                     disabled={currentStep === 0}
                                     className={`
-                                        flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                                        ${currentStep === 0
-                                            ? 'bg-white/5 text-neutral-500 cursor-not-allowed'
-                                            : 'bg-white/10 text-white hover:bg-white/20 border border-white/10'}
-                                    `}
+                        flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                        ${currentStep === 0
+                                            ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed'
+                                            : 'bg-white text-neutral-900 hover:bg-[var(--accent)]/10 border border-neutral-200'}
+                    `}
                                 >
                                     <div className="flex items-center justify-center gap-2">
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -810,23 +840,35 @@ export default function IntakeForm({ userId, onFormChange, onClose, onSuccess }:
                                     onClick={handleNext}
                                     disabled={!validateStep(currentStep)}
                                     className={`
-                                        flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                                        ${!validateStep(currentStep)
-                                            ? 'bg-neutral-700 text-neutral-300 cursor-not-allowed'
-                                            : 'bg-[#00FF87] text-neutral-900 hover:brightness-110'}
-                                    `}
+                        flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                        ${!validateStep(currentStep)
+                                            ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                                            : 'bg-[var(--accent)] text-white-900 hover:brightness-110'}
+                    `}
                                 >
-                                    <div className="flex items-center justify-center gap-2">
+                                    <div className="flex items-center justify-center gap-2 text-white">
                                         <span>Next</span>
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                        <svg
+                                            className="w-4 h-4"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M9 5l7 7-7 7"
+                                            />
                                         </svg>
                                     </div>
+
                                 </button>
                             </div>
                         )}
                     </div>
                 </div>
+
             </div>
         </div>
     );

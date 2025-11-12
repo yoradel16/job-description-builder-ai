@@ -4,10 +4,13 @@
   --background: #ffffff;
   --foreground: #171717;
   --font-sans: var(--font-poppins);
-  --accent: #00FF87;
+  --primary: #18416B;
+  --accent: #fac133;
+  --accent-bg: #fff9e990;
+
 }
 
-@theme inline {
+/* @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-poppins);
@@ -18,7 +21,7 @@
     --background: #0a0a0a;
     --foreground: #ededed;
   }
-}
+} */
 
 body {
   background: var(--background);
@@ -26,18 +29,12 @@ body {
   font-family: var(--font-sans);
 }
 
-a {
-  text-decoration: none;
-  cursor: pointer;
-  color: white;
-}
 
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0px 1000px rgba(255, 255, 255, 0.1) inset !important;
-  -webkit-text-fill-color: #e5e5e5 !important;
   transition: background-color 9999s ease-in-out 0s;
 }
 
@@ -119,5 +116,5 @@ input:-webkit-autofill:active {
 /* For Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #00FF87 transparent;
+  scrollbar-color: #fac133 transparent;
 }

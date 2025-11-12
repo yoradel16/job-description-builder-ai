@@ -10,7 +10,7 @@ type ModalProps = {
   title?: string;
   message?: string;
   body?: ReactNode | string;
-  confirmText?: string;
+  confirmText?: string | ReactNode;
   cancelText?: string;
   confirmVariant?: "primary" | "danger";
   maxWidth?: "sm" | "md" | "lg" | "xl" | "2xl" | "4xl";
@@ -41,7 +41,7 @@ export default function Modal({
   const confirmButtonClasses =
     confirmVariant === "danger"
       ? "bg-red-600 hover:bg-red-700 text-white"
-      : "bg-[#00FF87] hover:brightness-110 text-zinc-900";
+      : "bg-[var(--accent)] hover:brightness-110 text-white";
 
   return (
     <AnimatePresence>
