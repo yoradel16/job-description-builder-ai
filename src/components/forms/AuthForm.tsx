@@ -168,7 +168,7 @@ export default function AuthForm({
                 </div>
 
                 {/* Password Field with Strength Checker */}
-                <div className="mb-4 relative">
+                <div className={`relative ${isSignup ? 'mb-4' : 'mb-2'}`}>
                     <label htmlFor="password" className="block text-sm font-medium text-black/70 mb-1">
                         Password
                     </label>
@@ -200,6 +200,18 @@ export default function AuthForm({
                         </p>
                     )}
                 </div>
+
+                {/* Forgot Password Link - Only for Sign In */}
+                {!isSignup && (
+                    <div className="flex justify-end mb-4">
+                        <Link
+                            href="/forgot-password"
+                            className="text-xs text-black/60 hover:text-[var(--accent)] transition"
+                        >
+                            Forgot password?
+                        </Link>
+                    </div>
+                )}
 
                 {isSignup && (
                     <div className="mb-6 relative">

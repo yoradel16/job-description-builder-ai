@@ -56,7 +56,7 @@ export default function Navbar() {
 
     return (
         <>
-            <nav className="fixed top-4 right-6 flex items-center gap-6 px-6 py-3 rounded-2xl border border-neutral-200/30 bg-white shadow-md text-neutral-700">
+            <nav className="fixed top-4 right-6 z-[9999] flex items-center gap-6 px-6 py-3 rounded-2xl border border-neutral-200/30 bg-white shadow-md text-neutral-700">
 
                 {/* Account Dropdown */}
                 <Listbox value={selected} onChange={setSelected}>

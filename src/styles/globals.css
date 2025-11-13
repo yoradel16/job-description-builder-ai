@@ -116,5 +116,5 @@ input:-webkit-autofill:active {
 /* For Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #fac133 transparent;
+  scrollbar-color: var(--primary) transparent;
 }

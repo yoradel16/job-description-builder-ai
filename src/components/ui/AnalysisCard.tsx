@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, Calendar, Clock, Users, Target, Briefcase, AlertTriangle, Trash2, Copy } from 'lucide-react';
+import { ChevronDown, ChevronUp, Calendar, Clock, Users, Target, Briefcase, AlertTriangle, Trash2, Download } from 'lucide-react';
 import Modal from './Modal';
 
 interface SavedAnalysis {
@@ -112,6 +112,8 @@ const AnalysisCard = ({ savedAnalysis, onDelete }: AnalysisCardProps) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
 
     const formatDate = (date: string) => {
         return new Date(date).toLocaleDateString('en-US', {
@@ -146,6 +148,50 @@ const AnalysisCard = ({ savedAnalysis, onDelete }: AnalysisCardProps) => {
             alert("Failed to delete analysis. Please try again.");
         } finally {
             setIsDeleting(false);
+        }
+    };
+
+    const handleDownloadConfirm = async () => {
+        try {
+            setIsDownloading(true);
+
+            const response = await fetch('/api/jd/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    preview: savedAnalysis.preview,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to download PDF');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            // Get filename from response headers or use default
+            const contentDisposition = response.headers.get('Content-Disposition');
+            const filename = contentDisposition
+                ? contentDisposition.split('filename=')[1]?.replace(/"/g, '') || 'job-description-analysis.pdf'
+                : 'job-description-analysis.pdf';
+            
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            setIsDownloadModalOpen(false);
+        } catch (error) {
+            console.error('Download error:', error);
+            alert('Failed to download job description. Please try again.');
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -188,13 +234,11 @@ const AnalysisCard = ({ savedAnalysis, onDelete }: AnalysisCardProps) => {
                     {/* RIGHT SIDE (ICONS) */}
                     <div className="flex items-center gap-4 ml-6">
                         <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(savedAnalysis.title);
-                            }}
+                            onClick={() => setIsDownloadModalOpen(true)}
                             className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
-                            title="Copy title to clipboard"
+                            title="Download analysis as PDF"
                         >
-                            <Copy className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
+                            <Download className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
                         </button>
 
                         <button
@@ -496,6 +540,43 @@ const AnalysisCard = ({ savedAnalysis, onDelete }: AnalysisCardProps) => {
                 </div>
             )}
 
+            {/* Download Confirmation Modal */}
+            <Modal
+                isOpen={isDownloadModalOpen}
+                onClose={() => setIsDownloadModalOpen(false)}
+                onConfirm={handleDownloadConfirm}
+                title="Download Analysis"
+                message="Are you sure you want to download this analysis as a PDF?"
+                confirmVariant="primary"
+                confirmText={
+                    isDownloading ? (
+                        <div className="flex items-center gap-2">
+                            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                    fill="none"
+                                />
+                                <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                />
+                            </svg>
+                            <span>Downloading...</span>
+                        </div>
+                    ) : (
+                        "Download"
+                    )
+                }
+                cancelText="Cancel"
+            />
+
+            {/* Delete Confirmation Modal */}
             <Modal
                 isOpen={isDeleteModalOpen}
                 onClose={() => setIsDeleteModalOpen(false)}
@@ -528,6 +609,7 @@ const AnalysisCard = ({ savedAnalysis, onDelete }: AnalysisCardProps) => {
                         "Delete"
                     )
                 }
+                cancelText="Cancel"
             />
 
         </div>
